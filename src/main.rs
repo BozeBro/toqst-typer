@@ -16,18 +16,22 @@
 use std::{
     io::{self},
     time::{Duration, Instant},
+    vec,
 };
+
+use toqst_typer::toqst::*;
 
 use color_eyre::Result;
 use ratatui::{
     buffer::Buffer,
     crossterm::event::{self, Event, KeyCode, KeyEventKind},
-    layout::{Constraint, Layout, Rect},
-    style::{Color, Stylize},
-    text::{Line, Masked, Span},
+    layout::{Constraint, Layout, Position, Rect},
+    style::Stylize,
     widgets::{Block, Paragraph, Widget, Wrap},
-    DefaultTerminal,
+    DefaultTerminal, Frame,
 };
+
+const SPEED_TYPING_TITLE: &'static str = "Toqst's Speed Typing Test";
 
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -43,26 +47,47 @@ struct App {
     scroll: u16,
     last_tick: Instant,
     flag: bool,
+    cursor: UserCursor,
+    layout: Layout,
 }
 
 impl App {
     /// The duration between each tick.
-    const TICK_RATE: Duration = Duration::from_millis(250);
+    const TICK_RATE: Duration = Duration::from_secs(1);
 
     /// Create a new instance of the app.
     fn new() -> Self {
+        let layout = Layout::vertical([Constraint::Percentage(100)]);
         Self {
             should_exit: false,
             scroll: 0,
             last_tick: Instant::now(),
             flag: false,
+            cursor: UserCursor {
+                word_idx: 0,
+                char_idx: 0,
+                absolute_idx: 0,
+                words: vec![StyledWord::from_chars(vec!['a', 'b'])],
+            },
+            layout,
         }
     }
 
+    fn draw(&self, frame: &mut Frame) {
+        let rect = frame.area();
+        let [areas] = self.layout.areas(rect);
+        let cursor_x = areas.x + self.cursor.absolute_idx as u16 + 1;
+        let cursor_y = 1;
+        frame.set_cursor_position(Position::new(cursor_x, cursor_y));
+        frame.render_widget(self, rect);
+    }
+
     /// Run the app until the user exits.
-    fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
+    fn run(&mut self, mut terminal: DefaultTerminal) -> Result<()> {
         while !self.should_exit {
-            terminal.draw(|frame| frame.render_widget(&self, frame.area()))?;
+            terminal.draw(|frame| {
+                self.draw(frame);
+            })?;
             self.handle_events()?;
             if self.last_tick.elapsed() >= Self::TICK_RATE {
                 self.on_tick();
@@ -74,12 +99,15 @@ impl App {
 
     /// Handle events from the terminal.
     fn handle_events(&mut self) -> io::Result<()> {
-        let timeout = Self::TICK_RATE.saturating_sub(self.last_tick.elapsed());
-        while event::poll(timeout)? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press && key.code == KeyCode::Char('q') {
-                    self.should_exit = true;
-                }
+        if let Event::Key(key) = event::read()? {
+            if !(key.kind == KeyEventKind::Press) {
+                return Ok(());
+            }
+            match key.code {
+                KeyCode::Char(ch) => self.cursor.handle_key_press(ch),
+                KeyCode::Backspace | KeyCode::Delete => self.cursor.handle_delete(),
+                KeyCode::Esc => self.should_exit = true,
+                _ => {}
             }
         }
         Ok(())
@@ -94,12 +122,17 @@ impl App {
 
 impl Widget for &App {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let areas = Layout::vertical([Constraint::Percentage(100)]).split(area);
-        Paragraph::new(create_lines(area, &self.flag))
-            .block(title_block("Default alignment (Left), no wrap"))
-            .gray()
-            .wrap(Wrap { trim: true })
-            .render(areas[0], buf);
+        let areas = self.layout.split(area);
+        Paragraph::new(
+            self.cursor
+                .words
+                .iter()
+                .map(|word| word.get_styled_word())
+                .collect::<Vec<_>>(),
+        )
+        .block(title_block(SPEED_TYPING_TITLE))
+        .wrap(Wrap { trim: true })
+        .render(areas[0], buf);
     }
 }
 
@@ -108,38 +141,4 @@ fn title_block(title: &str) -> Block {
     Block::bordered()
         .gray()
         .title(title.bold().into_centered_line())
-}
-
-/// Create some lines to display in the paragraph.
-fn create_lines(area: Rect, _flag: &bool) -> Vec<Line<'static>> {
-    let short_line = if true {
-        "A long line to demonstrate line wrapping. "
-    } else {
-        "This is a really short line"
-    };
-    let long_line = short_line.repeat(usize::from(area.width) / short_line.len() + 4);
-    let mut styled_spans = vec![];
-    for span in [
-        "Styled".blue(),
-        "Spans".red().on_white(),
-        "Bold".bold(),
-        "Italic".italic(),
-        "Underlined".underlined(),
-        "Strikethrough".crossed_out(),
-    ] {
-        styled_spans.push(span);
-        styled_spans.push(" ".into());
-    }
-    let line_with_error = "Hell".green() + if *_flag { "o".red() } else { "o".green() };
-    vec![
-        Line::raw("Unstyled Line"),
-        Line::raw("Styled Line").black().on_red().bold().italic(),
-        Line::from(styled_spans),
-        Line::from(long_line.green().italic()),
-        Line::from_iter([
-            "Masked text: ".into(),
-            Span::styled(Masked::new("my secret password", '*'), Color::Red),
-        ]),
-        Line::from(line_with_error),
-    ]
 }
