@@ -1,32 +1,31 @@
 pub mod toqst {
     use ratatui::{
         style::{Color, Style},
-        text::{Line, Span},
+        text::{Line, Span, Text},
     };
 
-    const MISTYPE_COLOR: Color = Color::Red;
-    const UNTYPED_COLOR: Color = Color::Gray;
-    const CORRECT_COLOR: Color = Color::Green;
-    const MISTYPE_EXTRA_COLOR: Color = Color::Red;
+    pub const MISTYPE_COLOR: Color = Color::Red;
+    pub const UNTYPED_COLOR: Color = Color::Gray;
+    pub const CORRECT_COLOR: Color = Color::Green;
+    pub const MISTYPE_EXTRA_COLOR: Color = Color::Red;
 
-    #[derive(Debug)]
-    pub struct UserCursor {
-        pub word_idx: usize,
-        pub char_idx: usize,
-        pub absolute_idx: usize,
-        pub words: Vec<StyledWord>,
+    pub enum TypedState {
+        Mistype,
+        Untyped,
+        Correct,
+        MistypeExtra,
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     pub struct StyledWord {
         pub chars: Vec<StyledChar>,
         pub og_len: usize,
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     pub struct StyledChar {
-        pub char: char,
-        pub style: Style,
+        char: char,
+        style: Style,
     }
 
     impl StyledChar {
@@ -42,6 +41,21 @@ pub mod toqst {
                 style: Style::new().fg(MISTYPE_EXTRA_COLOR),
             }
         }
+
+        pub fn switch_typed_state(&mut self, state: TypedState) {
+            let color: Color;
+            match state {
+                TypedState::Mistype => color = MISTYPE_COLOR,
+                TypedState::Untyped => color = UNTYPED_COLOR,
+                TypedState::Correct => color = CORRECT_COLOR,
+                TypedState::MistypeExtra => color = MISTYPE_EXTRA_COLOR,
+            }
+            self.style = self.style.fg(color);
+        }
+
+        pub fn get_char_data(&self) -> char {
+            self.char
+        }
     }
 
     impl StyledWord {
@@ -52,7 +66,11 @@ pub mod toqst {
             }
         }
 
-        pub fn get_styled_word(&self) -> Line<'_> {
+        pub fn from_string(chars: &str) -> Self {
+            StyledWord::from_chars(chars.chars().collect())
+        }
+
+        pub fn get_styled_word(&self) -> Vec<Span<'_>> {
             self.chars
                 .iter()
                 .map(|char| Span::styled(String::from(char.char), char.style))
@@ -64,46 +82,6 @@ pub mod toqst {
 
         pub fn get_mut_ch(&mut self, index: usize) -> Option<&mut StyledChar> {
             self.chars.get_mut(index)
-        }
-    }
-
-    impl UserCursor {
-        pub fn handle_key_press(&mut self, pressed_char: char) {
-            let word = self.words.get_mut(self.word_idx).unwrap();
-            if let Some(ch) = word.get_mut_ch(self.char_idx) {
-                if ch.char == ' ' {
-                    todo!();
-                }
-                if ch.char == pressed_char {
-                    ch.style = ch.style.fg(CORRECT_COLOR);
-                } else {
-                    ch.style = ch.style.fg(MISTYPE_COLOR);
-                }
-            } else {
-                word.append_char(StyledChar::new_bad_char(pressed_char));
-            }
-            self.char_idx += 1;
-            self.absolute_idx += 1;
-        }
-
-        pub fn handle_delete(&mut self) {
-            if self.char_idx == 0 && self.word_idx == 0 {
-                return;
-            }
-
-            assert_ne!(self.absolute_idx, 0);
-            self.absolute_idx -= 1;
-
-            let word = self.words.get_mut(self.word_idx).unwrap();
-            self.char_idx -= 1;
-
-            if self.char_idx >= word.og_len {
-                word.chars.pop();
-            } else {
-                let ch = word.get_mut_ch(self.char_idx).unwrap();
-
-                ch.style = ch.style.fg(UNTYPED_COLOR);
-            }
         }
     }
 }
