@@ -1,7 +1,7 @@
 pub mod toqst {
     use ratatui::{
-        style::{Color, Style},
-        text::{Line, Span, Text},
+        style::{Color, Modifier, Style},
+        text::Span,
     };
 
     pub const MISTYPE_COLOR: Color = Color::Red;
@@ -76,8 +76,24 @@ pub mod toqst {
                 .map(|char| Span::styled(String::from(char.char), char.style))
                 .collect()
         }
+
+        pub fn get_styled_with_modifier(&self, idx: usize, modifier: Modifier) -> Vec<Span<'_>> {
+            self.chars
+                .iter()
+                .enumerate()
+                .map(|(iter_idx, StyledChar { char, style })| {
+                    let style = if iter_idx == idx {
+                        style.add_modifier(modifier)
+                    } else {
+                        *style
+                    };
+                    Span::styled(String::from(*char), style)
+                })
+                .collect()
+        }
+
         pub fn append_char(&mut self, ch: StyledChar) {
-            self.chars.push(ch);
+            self.chars.push(ch)
         }
 
         pub fn get_mut_ch(&mut self, index: usize) -> Option<&mut StyledChar> {
