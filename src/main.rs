@@ -8,7 +8,7 @@ use ratatui::{
     buffer::Buffer,
     crossterm::event::{self, Event, KeyCode, KeyEventKind},
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style, Stylize},
+    style::{Modifier, Style, Stylize},
     text::{Line, Span},
     widgets::{Block, Paragraph, Widget, Wrap},
     DefaultTerminal, Frame,
@@ -19,6 +19,7 @@ const SPEED_TYPING_TITLE: &'static str = "Toqst's Speed Typing Test";
 fn main() -> Result<()> {
     color_eyre::install()?;
     let terminal = ratatui::init();
+    // TODO: These letters should be randomly generated and on the fly when typing
     let app_result = App::new(vec![
         "variable",
         "function",
@@ -102,19 +103,33 @@ impl UserCursor {
         &self.words[self.word_idx]
     }
 
+    /// Style a word that is contained within the cursor word list
+    /// It is assumed that each word is owened by the cursor and thus will live as long as the
+    /// cursor
+    /// It is assumed that each word is separated by a space word
     fn style_word<'a>(
         &'a self,
         idx: usize,
         CursorWord { word, cursor_idx }: &'a CursorWord,
     ) -> Vec<Span<'a>> {
         let cursor_word = self.get_cursor_word();
-        let cursor_in_word = idx == 2 * self.word_idx && *cursor_idx < word.chars.len();
-        let cursor_in_space =
-            idx == 2 * self.word_idx + 1 && cursor_word.cursor_idx == cursor_word.word.chars.len();
+
+        let word_length = cursor_word.word.chars.len();
+
+        // Each word is on an even index
+        let cursor_in_word = idx == 2 * self.word_idx && *cursor_idx < word_length;
+        // Each space is on an odd index
+        let cursor_on_space = idx == 2 * self.word_idx + 1 && cursor_word.cursor_idx == word_length;
+
+        assert!(
+            cursor_word.cursor_idx <= word_length,
+            "A cursor should be inside of the designated word or on the space after the word"
+        );
+
         if cursor_in_word {
             return word
                 .get_styled_with_modifier(*cursor_idx, Modifier::BOLD | Modifier::UNDERLINED);
-        } else if cursor_in_space {
+        } else if cursor_on_space {
             return vec![Span::styled(
                 " ",
                 Style::default().add_modifier(Modifier::UNDERLINED),
@@ -166,13 +181,14 @@ impl UserCursor {
         *cursor_idx -= 1;
 
         if *cursor_idx >= word.og_len {
-            // This is an extra character the User typed, must discard
+            // Delete the extra character from the stream.
+            // Not part of original word
             word.chars.pop();
         } else {
-            // The character must exist as we are under the word length
-            let ch = word.get_mut_ch(*cursor_idx).unwrap();
-
-            ch.switch_typed_state(TypedState::Untyped);
+            // The character must still exist as we are under the word length
+            word.get_mut_ch(*cursor_idx)
+                .unwrap()
+                .switch_typed_state(TypedState::Untyped);
         }
     }
 }

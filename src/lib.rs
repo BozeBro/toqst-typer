@@ -4,9 +4,13 @@ pub mod toqst {
         text::Span,
     };
 
+    // User types the wrong letter when it should be another letter
     pub const MISTYPE_COLOR: Color = Color::Red;
+    // Letter that has not been typed yet
     pub const UNTYPED_COLOR: Color = Color::Gray;
+    // User types the correct letter (not a space)
     pub const CORRECT_COLOR: Color = Color::Green;
+    // User types a letter when it should have been a space
     pub const MISTYPE_EXTRA_COLOR: Color = Color::Red;
 
     pub enum TypedState {
@@ -18,10 +22,12 @@ pub mod toqst {
 
     #[derive(Debug, Clone)]
     pub struct StyledWord {
-        pub chars: Vec<StyledChar>,
-        pub og_len: usize,
+        pub chars: Vec<StyledChar>, // A collection of chars that make up the word
+        pub og_len: usize,          // Original length of the chars array
     }
 
+    /// A Character that can be styled for TUI output
+    /// Abstraction that Users type StyledChar (not char)
     #[derive(Debug, Clone)]
     pub struct StyledChar {
         char: char,
@@ -35,6 +41,7 @@ pub mod toqst {
                 style: Style::new().fg(UNTYPED_COLOR),
             }
         }
+        // Create a Styled Character with a mistype connotation
         pub fn new_bad_char(ch: char) -> Self {
             Self {
                 char: ch,
@@ -42,6 +49,7 @@ pub mod toqst {
             }
         }
 
+        // Switch the Styled State of a Styled Char
         pub fn switch_typed_state(&mut self, state: TypedState) {
             let color: Color;
             match state {
@@ -77,6 +85,9 @@ pub mod toqst {
                 .collect()
         }
 
+        /// Get the Styled Representation of a word with a modifier added to one of the
+        /// characters in the word
+        /// It is assumed that the idx is within bounds of the word
         pub fn get_styled_with_modifier(&self, idx: usize, modifier: Modifier) -> Vec<Span<'_>> {
             self.chars
                 .iter()
