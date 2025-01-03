@@ -1,5 +1,9 @@
-#![feature(iter_intersperse)]
-use std::{io, vec};
+#![feature(iter_intersperse, file_buffered)]
+use std::{
+    fs::File,
+    io::{self, BufRead},
+    vec,
+};
 
 use toqst_typer::toqst::*;
 
@@ -14,65 +18,27 @@ use ratatui::{
     DefaultTerminal, Frame,
 };
 
+use rand::seq::IteratorRandom;
+
 const SPEED_TYPING_TITLE: &'static str = "Toqst's Speed Typing Test";
+const FILE: &'static str = "1000-most-common-words.txt";
+const NUM_WORDS: usize = 50;
 
 fn main() -> Result<()> {
     color_eyre::install()?;
     let terminal = ratatui::init();
     // TODO: These letters should be randomly generated and on the fly when typing
-    let app_result = App::new(vec![
-        "variable",
-        "function",
-        "loop",
-        "class",
-        "object",
-        "string",
-        "list",
-        "dictionary",
-        "tuple",
-        "set",
-        "import",
-        "module",
-        "package",
-        "exception",
-        "try",
-        "except",
-        "return",
-        "if",
-        "else",
-        "elif",
-        "while",
-        "for",
-        "break",
-        "continue",
-        "pass",
-        "lambda",
-        "decorator",
-        "generator",
-        "yield",
-        "recursion",
-        "argument",
-        "parameter",
-        "scope",
-        "namespace",
-        "global",
-        "local",
-        "assert",
-        "true",
-        "false",
-        "none",
-        "identity",
-        "equality",
-        "operator",
-        "importerror",
-        "syntaxerror",
-        "indentation",
-        "comprehension",
-        "slicing",
-        "map",
-        "filter",
-    ])
-    .run(terminal);
+    let file = File::open_buffered(FILE)?;
+    let words: Vec<_> = file
+        .lines()
+        .map(|line| line.unwrap_or(String::new()).trim().to_string())
+        .filter(|word| !word.is_empty())
+        .collect();
+
+    let mut rng = rand::thread_rng();
+    let rand_words: Vec<_> = words.iter().choose_multiple(&mut rng, NUM_WORDS);
+
+    let app_result = App::new(rand_words).run(terminal);
     ratatui::restore();
     app_result
 }
@@ -126,13 +92,13 @@ impl UserCursor {
             "A cursor should be inside of the designated word or on the space after the word"
         );
 
+        let cursor_modifier = Modifier::BOLD | Modifier::UNDERLINED;
         if cursor_in_word {
-            return word
-                .get_styled_with_modifier(*cursor_idx, Modifier::BOLD | Modifier::UNDERLINED);
+            return word.get_styled_with_modifier(*cursor_idx, cursor_modifier);
         } else if cursor_on_space {
             return vec![Span::styled(
                 " ",
-                Style::default().add_modifier(Modifier::UNDERLINED),
+                Style::default().add_modifier(cursor_modifier),
             )];
         }
         word.get_styled_word()
@@ -207,7 +173,7 @@ impl App {
     // const TICK_RATE: Duration = Duration::from_secs(1);
 
     /// Create a new instance of the app.
-    fn new(words: Vec<&str>) -> Self {
+    fn new(words: Vec<&String>) -> Self {
         let layout = Layout::vertical([Constraint::Percentage(100)]);
         Self {
             should_exit: false,
@@ -216,7 +182,7 @@ impl App {
                 words: words
                     .into_iter()
                     .map(|str| CursorWord {
-                        word: StyledWord::from_string(str),
+                        word: StyledWord::from_string(&str),
                         cursor_idx: 0,
                     })
                     .collect(),
