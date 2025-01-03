@@ -23,11 +23,11 @@ use rand::seq::IteratorRandom;
 const SPEED_TYPING_TITLE: &'static str = "Toqst's Speed Typing Test";
 const FILE: &'static str = "1000-most-common-words.txt";
 const NUM_WORDS: usize = 50;
+const EXTRA_CHAR_BOUNDARY: usize = 5;
 
 fn main() -> Result<()> {
     color_eyre::install()?;
     let terminal = ratatui::init();
-    // TODO: These letters should be randomly generated and on the fly when typing
     let file = File::open_buffered(FILE)?;
     let words: Vec<_> = file
         .lines()
@@ -35,11 +35,14 @@ fn main() -> Result<()> {
         .filter(|word| !word.is_empty())
         .collect();
 
+    // TODO: Should there be a restart option instead of only generating on startup
     let mut rng = rand::thread_rng();
-    let rand_words: Vec<_> = words.iter().choose_multiple(&mut rng, NUM_WORDS);
+    let rand_words = words.iter().choose_multiple(&mut rng, NUM_WORDS);
 
     let app_result = App::new(rand_words).run(terminal);
     ratatui::restore();
+    // TODO: game loop so go to end game screen and give option to repeat
+    println!("Game is done");
     app_result
 }
 
@@ -61,6 +64,9 @@ struct UserCursor {
 /// Responsible for moving the cursor positions and modifying the correct/incorrect colors when a
 /// user types
 impl UserCursor {
+    fn game_is_done(&self) -> bool {
+        self.word_idx == self.words.len()
+    }
     fn handle_space_press(&mut self) {
         self.word_idx += 1;
     }
@@ -115,6 +121,11 @@ impl UserCursor {
                 ch.switch_typed_state(TypedState::Mistype);
             }
         } else {
+            if (word.chars.len() + 1) - word.og_len > EXTRA_CHAR_BOUNDARY {
+                return;
+            }
+            // word.chars should always contains the original characters
+            assert!(word.chars.len() >= word.og_len);
             word.append_char(StyledChar::new_bad_char(pressed_char));
         }
         *cursor_idx += 1;
@@ -205,6 +216,7 @@ impl App {
                 self.draw(frame);
             })?;
             self.handle_events()?;
+            self.should_exit = self.cursor.game_is_done();
         }
         Ok(())
     }
@@ -230,6 +242,7 @@ impl Widget for &App {
     /// Responsible for rendering just the Speed Typing test onto the screen and each of the
     /// words managed by the Cursor
     fn render(self, area: Rect, buf: &mut Buffer) {
+        // TODO: There should be a timer countdown option
         let areas = self.layout.split(area);
         let separator = CursorWord {
             word: StyledWord::from_string(" "),
