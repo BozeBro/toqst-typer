@@ -3,14 +3,16 @@
 extern crate chrono;
 extern crate timer;
 
+use std::sync::atomic::{AtomicIsize, Ordering};
 use std::{
     fs::File,
     io::{self, BufRead},
-    vec,
+    thread, time, vec,
 };
 
-use std::time::SystemTime;
+use std::sync::Arc;
 
+use std::cmp;
 use toqst_typer::toqst::*;
 
 use color_eyre::Result;
@@ -30,6 +32,7 @@ const SPEED_TYPING_TITLE: &'static str = "Toqst's Speed Typing Test";
 const FILE: &'static str = "1000-most-common-words.txt";
 const NUM_WORDS: usize = 50;
 const EXTRA_CHAR_BOUNDARY: usize = 5;
+const COUNTDOWN: isize = 10;
 
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -172,11 +175,13 @@ impl UserCursor {
     }
 }
 
-#[derive(Debug)]
 enum TypingEvent {
     AFK,
-    TYPED(SystemTime),
+    // TODO: need a way to
+    // join on a handler or supply information that game is done
+    TYPED(Arc<AtomicIsize>, thread::JoinHandle<()>),
 }
+
 /// Speed Typing Test Application
 ///
 /// High Level Logic for Rendering the Terminal Typing Application onto Terminal
@@ -186,6 +191,7 @@ struct App {
     should_exit: bool,
     cursor: UserCursor,
     layout: Layout,
+    // count: Arc<AtomicIsize>,
 }
 
 impl App {
@@ -193,7 +199,7 @@ impl App {
 
     /// Create a new instance of the app.
     fn new(words: Vec<&String>) -> Self {
-        let layout = Layout::vertical([Constraint::Percentage(100)]);
+        let layout = Layout::vertical([Constraint::Percentage(10), Constraint::Percentage(90)]);
         Self {
             user_typing: TypingEvent::AFK,
             should_exit: false,
@@ -218,19 +224,16 @@ impl App {
         frame.render_widget(self, rect);
     }
 
+    fn get_countdown(&self) -> Option<isize> {
+        if let TypingEvent::TYPED(counter, _) = &self.user_typing {
+            let count = counter.load(Ordering::Acquire);
+            return Some(count);
+        }
+        None
+    }
     fn is_typing_time_done(&self) -> bool {
-        if let TypingEvent::TYPED(start_time) = self.user_typing {
-            match start_time.elapsed() {
-                Ok(elapsed) => {
-                    return elapsed.as_secs() > 20;
-                }
-                Err(e) => {
-                    panic!(
-                        "Error for retrieving elapsed time has occurred with error: {}",
-                        e
-                    );
-                }
-            }
+        if let Some(elapsed) = self.get_countdown() {
+            return elapsed == 0;
         }
 
         false
@@ -246,9 +249,35 @@ impl App {
             // Because in immediate mode, we need to manually check the time ourselves
             // the precision will not be off by much if we manually check
             // Checking async is not too helpful because of these facts
-            self.should_exit = self.cursor.is_game_done() || self.is_typing_time_done();
+            self.should_exit =
+                self.should_exit || self.cursor.is_game_done() || self.is_typing_time_done();
+            if self.should_exit {
+                self.user_typing = TypingEvent::AFK;
+            }
         }
         Ok(())
+    }
+
+    fn handle_char_read(&mut self, ch: char) {
+        if ch == ' ' {
+            self.cursor.handle_space_press();
+        } else {
+            self.cursor.handle_key_press(ch);
+        }
+        if !matches!(self.user_typing, TypingEvent::AFK) {
+            return;
+        }
+        let atom_counter = Arc::new(AtomicIsize::new(COUNTDOWN));
+        let counter: Arc<AtomicIsize> = Arc::clone(&atom_counter);
+        let timer_thread = thread::spawn(move || {
+            let second_delay = time::Duration::from_secs(1);
+            // TODO: Have a way to check if the game is over
+            while counter.load(Ordering::Acquire) != 0 {
+                thread::sleep(second_delay);
+                counter.fetch_add(-1, Ordering::Release);
+            }
+        });
+        self.user_typing = TypingEvent::TYPED(atom_counter, timer_thread);
     }
 
     /// Handle events from the terminal.
@@ -256,16 +285,7 @@ impl App {
         if let Event::Key(key) = event::read()? {
             if key.kind == KeyEventKind::Press {
                 match key.code {
-                    KeyCode::Char(ch) => {
-                        if ch == ' ' {
-                            self.cursor.handle_space_press();
-                        } else {
-                            self.cursor.handle_key_press(ch);
-                        }
-                        if matches!(self.user_typing, TypingEvent::AFK) {
-                            self.user_typing = TypingEvent::TYPED(SystemTime::now());
-                        }
-                    }
+                    KeyCode::Char(ch) => self.handle_char_read(ch),
                     KeyCode::Backspace | KeyCode::Delete => self.cursor.handle_delete(),
                     KeyCode::Esc => self.should_exit = true,
                     _ => {}
@@ -298,10 +318,21 @@ impl Widget for &App {
                 .flat_map(|(idx, cursor_word)| self.cursor.style_word(idx, cursor_word))
                 .collect::<Line<'_>>(),
         )
-        .block(title_block(SPEED_TYPING_TITLE))
+        .block(Block::bordered().gray())
         .left_aligned()
         .wrap(Wrap { trim: true })
-        .render(areas[0], buf);
+        .render(areas[1], buf);
+
+        let elapsed = match self.get_countdown() {
+            Some(elapsed) => cmp::max(elapsed, 0),
+            None => COUNTDOWN,
+        };
+
+        Paragraph::new(elapsed.to_string())
+            .block(title_block(SPEED_TYPING_TITLE))
+            .left_aligned()
+            .wrap(Wrap { trim: true })
+            .render(areas[0], buf);
     }
 }
 
