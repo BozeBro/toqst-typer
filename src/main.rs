@@ -1,9 +1,15 @@
 #![feature(iter_intersperse, file_buffered)]
+
+extern crate chrono;
+extern crate timer;
+
 use std::{
     fs::File,
     io::{self, BufRead},
     vec,
 };
+
+use std::time::SystemTime;
 
 use toqst_typer::toqst::*;
 
@@ -64,7 +70,7 @@ struct UserCursor {
 /// Responsible for moving the cursor positions and modifying the correct/incorrect colors when a
 /// user types
 impl UserCursor {
-    fn game_is_done(&self) -> bool {
+    fn is_game_done(&self) -> bool {
         self.word_idx == self.words.len()
     }
     fn handle_space_press(&mut self) {
@@ -136,23 +142,19 @@ impl UserCursor {
     /// Keep the character in the word list if it belonged in the original word_list
     /// Otherwise, we must discard the character as if it never existed
     fn handle_delete(&mut self) {
-        let CursorWord {
-            word: _,
-            cursor_idx,
-        } = self.words.get(self.word_idx).unwrap();
+        let cursor_idx = self.words.get(self.word_idx).unwrap().cursor_idx;
 
-        if *cursor_idx == 0 && self.word_idx == 0 {
+        if cursor_idx == 0 && self.word_idx == 0 {
             return;
         }
 
         // At the beginning of the word
         // Move to the previous word
-        if *cursor_idx == 0 {
+        if cursor_idx == 0 {
             self.word_idx -= 1;
             return;
         }
 
-        // reborrow with mutable perms
         let CursorWord { word, cursor_idx } = self.words.get_mut(self.word_idx).unwrap();
 
         *cursor_idx -= 1;
@@ -169,12 +171,18 @@ impl UserCursor {
         }
     }
 }
+
+#[derive(Debug)]
+enum TypingEvent {
+    AFK,
+    TYPED(SystemTime),
+}
 /// Speed Typing Test Application
 ///
 /// High Level Logic for Rendering the Terminal Typing Application onto Terminal
 /// Receives different keypress events from users and forwards events to the Cursor to handle logic
-#[derive(Debug)]
 struct App {
+    user_typing: TypingEvent,
     should_exit: bool,
     cursor: UserCursor,
     layout: Layout,
@@ -187,6 +195,7 @@ impl App {
     fn new(words: Vec<&String>) -> Self {
         let layout = Layout::vertical([Constraint::Percentage(100)]);
         Self {
+            user_typing: TypingEvent::AFK,
             should_exit: false,
             cursor: UserCursor {
                 word_idx: 0,
@@ -209,6 +218,24 @@ impl App {
         frame.render_widget(self, rect);
     }
 
+    fn is_typing_time_done(&self) -> bool {
+        if let TypingEvent::TYPED(start_time) = self.user_typing {
+            match start_time.elapsed() {
+                Ok(elapsed) => {
+                    return elapsed.as_secs() > 20;
+                }
+                Err(e) => {
+                    panic!(
+                        "Error for retrieving elapsed time has occurred with error: {}",
+                        e
+                    );
+                }
+            }
+        }
+
+        false
+    }
+
     /// Run the app until the user exits.
     fn run(&mut self, mut terminal: DefaultTerminal) -> Result<()> {
         while !self.should_exit {
@@ -216,7 +243,7 @@ impl App {
                 self.draw(frame);
             })?;
             self.handle_events()?;
-            self.should_exit = self.cursor.game_is_done();
+            self.should_exit = self.cursor.is_game_done() || self.is_typing_time_done();
         }
         Ok(())
     }
@@ -226,8 +253,16 @@ impl App {
         if let Event::Key(key) = event::read()? {
             if key.kind == KeyEventKind::Press {
                 match key.code {
-                    KeyCode::Char(' ') => self.cursor.handle_space_press(),
-                    KeyCode::Char(ch) => self.cursor.handle_key_press(ch),
+                    KeyCode::Char(ch) => {
+                        if ch == ' ' {
+                            self.cursor.handle_space_press();
+                        } else {
+                            self.cursor.handle_key_press(ch);
+                        }
+                        if matches!(self.user_typing, TypingEvent::AFK) {
+                            self.user_typing = TypingEvent::TYPED(SystemTime::now());
+                        }
+                    }
                     KeyCode::Backspace | KeyCode::Delete => self.cursor.handle_delete(),
                     KeyCode::Esc => self.should_exit = true,
                     _ => {}
@@ -243,6 +278,7 @@ impl Widget for &App {
     /// words managed by the Cursor
     fn render(self, area: Rect, buf: &mut Buffer) {
         // TODO: There should be a timer countdown option
+        // TODO: Scrolling on input would be nice
         let areas = self.layout.split(area);
         let separator = CursorWord {
             word: StyledWord::from_string(" "),
