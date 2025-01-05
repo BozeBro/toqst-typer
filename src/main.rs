@@ -243,6 +243,9 @@ impl App {
                 self.draw(frame);
             })?;
             self.handle_events()?;
+            // Because in immediate mode, we need to manually check the time ourselves
+            // the precision will not be off by much if we manually check
+            // Checking async is not too helpful because of these facts
             self.should_exit = self.cursor.is_game_done() || self.is_typing_time_done();
         }
         Ok(())
