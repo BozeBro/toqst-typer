@@ -272,7 +272,8 @@ impl App {
         let timer_thread = thread::spawn(move || {
             let second_delay = time::Duration::from_secs(1);
             // TODO: Have a way to check if the game is over
-            while counter.load(Ordering::Acquire) != 0 {
+            // so the thread can be killed and dropped
+            while counter.load(Ordering::Acquire) > 0 {
                 thread::sleep(second_delay);
                 counter.fetch_add(-1, Ordering::Release);
             }
@@ -300,7 +301,6 @@ impl Widget for &App {
     /// Responsible for rendering just the Speed Typing test onto the screen and each of the
     /// words managed by the Cursor
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // TODO: There should be a timer countdown option
         // TODO: Scrolling on input would be nice
         let areas = self.layout.split(area);
         let separator = CursorWord {
@@ -323,12 +323,11 @@ impl Widget for &App {
         .wrap(Wrap { trim: true })
         .render(areas[1], buf);
 
-        let elapsed = match self.get_countdown() {
+        let countdown = match self.get_countdown() {
             Some(elapsed) => cmp::max(elapsed, 0),
             None => COUNTDOWN,
         };
-
-        Paragraph::new(elapsed.to_string())
+        Paragraph::new(countdown.to_string())
             .block(title_block(SPEED_TYPING_TITLE))
             .left_aligned()
             .wrap(Wrap { trim: true })
